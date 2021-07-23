@@ -1,0 +1,219 @@
+{
+    "AWSTemplateFormatVersion": "2010-09-09",
+    "Description": "Monitor IAM events with CloudWatch Events rules with AWS CloudFormation. This Stack must be deployed in 'us-east-1' (IAM).",
+    "Parameters": {
+        "EmailList": {
+            "Type": "String",
+            "Description": "Email to notify!",
+            "AllowedPattern": "[a-zA-Z0-9]+@[a-zA-Z0-9]+\\.[a-zA-Z]+",
+            "Default": "mail@company.com"
+        },
+        "SNSTopicName": {
+            "Type": "String",
+            "Description": "Name for the notification topic.",
+            "AllowedPattern": "[a-zA-Z0-9_-]+",
+            "Default": "iam-monitoring-topic"
+        },
+        "MonitorStatus": {
+            "Type": "String",
+            "Description": "Enable / Disable monitor.",
+            "AllowedValues": [
+                "ENABLED",
+                "DISABLED"
+            ],
+            "Default": "ENABLED"
+        }
+    },
+    "Resources": {
+        "SNSMonitoringTopic": {
+            "Type": "AWS::SNS::Topic",
+            "Properties": {
+                "Subscription": [
+                    {
+                        "Endpoint": {
+                            "Ref": "EmailList"
+                        },
+                        "Protocol": "email"
+                    }
+                ],
+                "TopicName": {
+                    "Fn::Sub": "${AWS::StackName}-${SNSTopicName}"
+                }
+            }
+        },
+        "SNSMonitoringTopicTopicPolicy": {
+            "Type": "AWS::SNS::TopicPolicy",
+            "Properties": {
+                "Topics": [
+                    {
+                        "Ref": "SNSMonitoringTopic"
+                    }
+                ],
+                "PolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Sid": "SnsIAMTopicPolicy",
+                            "Effect": "Allow",
+                            "Principal": {
+                                "Service": "events.amazonaws.com"
+                            },
+                            "Action": [
+                                "sns:Publish"
+                            ],
+                            "Resource": {
+                                "Ref": "SNSMonitoringTopic"
+                            }
+                        },
+                        {
+                            "Sid": "AllowAccessToTopicOwner",
+                            "Effect": "Allow",
+                            "Principal": {
+                                "AWS": "*"
+                            },
+                            "Action": [
+                                "sns:GetTopicAttributes",
+                                "sns:SetTopicAttributes",
+                                "sns:AddPermission",
+                                "sns:RemovePermission",
+                                "sns:DeleteTopic",
+                                "sns:Subscribe",
+                                "sns:ListSubscriptionsByTopic",
+                                "sns:Publish",
+                                "sns:Receive"
+                            ],
+                            "Resource": {
+                                "Ref": "SNSMonitoringTopic"
+                            },
+                            "Condition": {
+                                "StringEquals": {
+                                    "AWS:SourceOwner": {
+                                        "Ref": "AWS::AccountId"
+                                    }
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+        },
+        "EventRulePolicyMonitor": {
+            "Type": "AWS::Events::Rule",
+            "Properties": {
+                "Name": {
+                    "Fn::Sub": "${AWS::StackName}-policy-monitor"
+                },
+                "Description": "This CloudWatch Event Rule will capture IAM API Calls and events related to creation and deletion of policies.\n",
+                "State": {
+                    "Ref": "MonitorStatus"
+                },
+                "EventPattern": {
+                    "source": [
+                        "aws.iam"
+                    ],
+                    "detail-type": [
+                        "AWS API Call via CloudTrail"
+                    ],
+                    "detail": {
+                        "eventSource": [
+                            "iam.amazonaws.com"
+                        ],
+                        "eventName": [
+                            "CreatePolicy",
+                            "DeletePolicy",
+                            "PutGroupPolicy",
+                            "DeleteGroupPolicy",
+                            "PutRolePolicy",
+                            "DeleteRolePolicy",
+                            "PutUserPolicy",
+                            "DeleteUserPolicy",
+                            "CreatePolicyVersion",
+                            "DeletePolicyVersion",
+                            "AttachRolePolicy",
+                            "DetachRolePolicy",
+                            "AttachUserPolicy",
+                            "DetachUserPolicy",
+                            "AttachGroupPolicy",
+                            "DetachGroupPolicy"
+                        ]
+                    }
+                },
+                "Targets": [
+                    {
+                        "Arn": {
+                            "Ref": "SNSMonitoringTopic"
+                        },
+                        "Id": "iam-policy-monitor",
+                        "InputTransformer": {
+                            "InputPathsMap": {
+                                "eventName": "$.detail.eventName",
+                                "policyName": "$.detail.requestParameters.policyName",
+                                "policyArn": "$.detail.requestParameters.policyArn",
+                                "eventTime": "$.detail.eventTime",
+                                "userIdentity": "$.detail.userIdentity.arn",
+                                "sourceIPAddress": "$.detail.sourceIPAddress"
+                            },
+                            "InputTemplate": "\"API Call '<eventName>' was issued on policy '<policyName><policyArn>'. This occurred at '<eventTime>' and was initiated by '<userIdentity>' from IP '<sourceIPAddress>'. Please review the details here: https://console.aws.amazon.com/iam/home?region=us-east-1#/policies/<policyArn>$jsonEditor?section=attached_entities .\"\n"
+                        }
+                    }
+                ]
+            }
+        },
+        "EventRulePrincipalsMonitor": {
+            "Type": "AWS::Events::Rule",
+            "Properties": {
+                "Name": {
+                    "Fn::Sub": "${AWS::StackName}-principals-monitor"
+                },
+                "Description": "This CloudWatch Event Rule will capture IAM API Calls and events related to creation and deletion of users, groups and roles.",
+                "State": {
+                    "Ref": "MonitorStatus"
+                },
+                "EventPattern": {
+                    "source": [
+                        "aws.iam"
+                    ],
+                    "detail-type": [
+                        "AWS API Call via CloudTrail"
+                    ],
+                    "detail": {
+                        "eventSource": [
+                            "iam.amazonaws.com"
+                        ],
+                        "eventName": [
+                            "CreateUser",
+                            "CreateGroup",
+                            "CreateRole",
+                            "UpdateUser",
+                            "UpdateGroup",
+                            "UpdateRole",
+                            "DeleteUser",
+                            "DeleteGroup",
+                            "DeleteRole"
+                        ]
+                    }
+                },
+                "Targets": [
+                    {
+                        "Arn": {
+                            "Ref": "SNSMonitoringTopic"
+                        },
+                        "Id": "iam-user-monitor",
+                        "InputTransformer": {
+                            "InputPathsMap": {
+                                "eventName": "$.detail.eventName",
+                                "userName": "$.detail.requestParameters.userName",
+                                "roleName": "$.detail.requestParameters.roleName",
+                                "groupName": "$.detail.requestParameters.groupName",
+                                "eventTime": "$.detail.eventTime",
+                                "userIdentity": "$.detail.userIdentity.arn",
+                                "sourceIPAddress": "$.detail.sourceIPAddress"
+                            },
+                            "InputTemplate": "\"API Call '<eventName>' was issued on '<userName><roleName><groupName>'. This occurred at '<eventTime>' and was initiated by '<userIdentity>' from IP '<sourceIPAddress>'. \"\n"
+                        }
+                    }
+                ]
+            }
+        }
+    }
+}
