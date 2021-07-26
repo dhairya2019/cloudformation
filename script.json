@@ -120,6 +120,8 @@
                         ],
                         "eventName": [
                             "CreatePolicy",
+                            "CreateAccessKey",
+                            "UpdateAccessKey",
                             "DeletePolicy",
                             "PutGroupPolicy",
                             "DeleteGroupPolicy",
